@@ -19,37 +19,51 @@ pop_dir() {
 
 build_start_time=$(date +%s.%N)
 
-build_app() {
-  local -n cflags=$1
-  local -n ldflags=$2
-
-  g++ "${cflags[@]}" cpu.cpp -o build/cpu "${ldflags[@]}"
+build() {
+  if [[ "$BUILD_TYPE" == "app" ]]; then
+    if [[ "$param_verbose" == "1" ]]; then
+      # TODO(Ryan): Won't print compiler errors
+      compiler_output=$( { set -x; g++ "${compiler_flags[@]}" cpu.cpp -o build/cpu "${linker_flags[@]}"; } 2>&1 )
+      # NOTE(Ryan): Overcome Vim quickfix window line character limitation
+      line_demarcation=900
+      first_line="${compiler_output:0:$line_demarcation}"
+      for ((i=$((line_demarcation - 100)); i < $line_demarcation; i++)); do
+        ch="${first_line:i:1}"
+        # NOTE(Ryan): Ensure don't split lines during text
+        if [[ "$ch" == " " ]]; then
+          line_demarcation=$i
+          break
+        fi
+      done
+      first_line="${compiler_output:0:$line_demarcation}"
+      second_line="${compiler_output:$((line_demarcation + 1))}"
+      printf "%s\n%s\n" "$first_line" "$second_line"
+    else
+      g++ "${compiler_flags[@]}" cpu.cpp -o build/cpu "${linker_flags[@]}"
+    fi
+  else
+    for t in "${tests[@]}"; do
+      g++ "${compiler_flags[@]}" "$t".cpp -o build/"$t" "${linker_flags[@]}"
+    done
+  fi
 }
 
-run_app() {
+run() {
   push_dir run
-  # NOTE(Ryan): Remove ascii colour escape sequences for Vim quickfix window
-  time ../build/cpu | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g"
+
+  if [[ "$BUILD_TYPE" == "app" ]]; then
+    time ../build/cpu | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g"
+  else
+    # tests build a top of app
+    # build/"$name"-test.cpp | nasm
+    # diff listing.c
+    for t in "${tests[@]}"; do
+      build/"$t"
+    done
+  fi
+
   pop_dir
 }
-
-build_tests() {
-  local -n cflags=$1
-  local -n ldflags=$2
-  local -n files=$3
-
-  for f in "${files[@]}"; do
-    g++ "${compiler_flags[@]}" "$f".cpp -o build/"$f" "${linker_flags[@]}"
-  done
-}
-
-run_tests() {
-  # tests build a top of app
-  # build/"$name"-test.cpp | nasm
-  # diff listing.c
-  echo "hi"
-}
-
 
 print_end_time() {
   build_end_time=$(date +%s.%N)
@@ -80,6 +94,7 @@ mkdir -p build run
 
 compiler_flags=()
 linker_flags=()
+tests=()
 
 if [[ "$param_arch" == "x86_64" && "$param_compiler" == "g++" && "$os" == "linux" ]]; then
   # NOTE(Ryan): Enable various warnings largely related to implicit signed, alignment, casting, promotion issues
@@ -124,35 +139,13 @@ if [[ "$param_arch" == "x86_64" && "$param_compiler" == "g++" && "$os" == "linux
     # NOTE(Ryan): Static analyser
     # compiler_flags+=( "-fanalyzer" )
     
-    if [[ "$param_verbose" == "1" ]]; then
-      # TODO(Ryan): Won't print compiler errors
-      #compiler_output=$( { set -x; g++ "${compiler_flags[@]}" "$app_name".cpp -o build/"$app_name" "${linker_flags[@]}"; } 2>&1 )
-      compiler_output=$( { set -x; build_app compiler_flags linker_flags; } 2>&1 )
-
-      # NOTE(Ryan): Overcome Vim quickfix window line character limitation
-      line_demarcation=900
-      first_line="${compiler_output:0:$line_demarcation}"
-      for ((i=$((line_demarcation - 100)); i < $line_demarcation; i++)); do
-        ch="${first_line:i:1}"
-        # NOTE(Ryan): Ensure don't split lines during text
-        if [[ "$ch" == " " ]]; then
-          line_demarcation=$i
-          break
-        fi
-      done
-      first_line="${compiler_output:0:$line_demarcation}"
-      second_line="${compiler_output:$((line_demarcation + 1))}"
-      printf "%s\n%s\n" "$first_line" "$second_line"
-    else
-      build_app compiler_flags linker_flags
-      # g++ ${compiler_flags[*]} "$app_name".cpp -o build/"$app_name" ${linker_flags[*]}
-    fi
+    build
 
     #g++ ${compiler_flags[*]} code/app.cpp -shared -fPIC -o run/app.so ${linker_flags[*]}
 
     print_end_time
 
-    run_app
+    run
     #push_dir run
     ## NOTE(Ryan): Remove ascii colour escape sequences for Vim quickfix window
     #time ../build/"$app_name" | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g"
@@ -168,8 +161,7 @@ if [[ "$param_arch" == "x86_64" && "$param_compiler" == "g++" && "$os" == "linux
     compiler_flags+=( "-fdevirtualize-at-ltrans" )
     linker_flags+=( "-Wl,--gc-sections" )
 
-    build_app compiler_flags linker_flags
-
+    build
   else
     printf "Error: Build currently only supports debug and release modes\n" >&2
     exit 1
@@ -178,4 +170,3 @@ else
   printf "Error: Build currently only supports x86_64 g++ on linux\n" >&2
   exit 1
 fi
-
