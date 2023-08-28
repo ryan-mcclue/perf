@@ -1,0 +1,181 @@
+#!/bin/bash
+
+set -oue pipefail
+
+if [[ "$1" != "app" && "$1" != "tests" ]]; then
+  printf "Usage: ./build <app|tests>\n" >&2
+  exit 1
+fi
+
+BUILD_TYPE="$1"
+
+push_dir() {
+  command pushd "$@" > /dev/null
+}
+
+pop_dir() {
+  command popd "$@" > /dev/null
+}
+
+build_start_time=$(date +%s.%N)
+
+build_app() {
+  local -n cflags=$1
+  local -n ldflags=$2
+
+  g++ "${cflags[@]}" cpu.cpp -o build/cpu "${ldflags[@]}"
+}
+
+run_app() {
+  push_dir run
+  # NOTE(Ryan): Remove ascii colour escape sequences for Vim quickfix window
+  time ../build/cpu | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g"
+  pop_dir
+}
+
+build_tests() {
+  local -n cflags=$1
+  local -n ldflags=$2
+  local -n files=$3
+
+  for f in "${files[@]}"; do
+    g++ "${compiler_flags[@]}" "$f".cpp -o build/"$f" "${linker_flags[@]}"
+  done
+}
+
+run_tests() {
+  # tests build a top of app
+  # build/"$name"-test.cpp | nasm
+  # diff listing.c
+  echo "hi"
+}
+
+
+print_end_time() {
+  build_end_time=$(date +%s.%N)
+  build_time=$( echo "($build_end_time - $build_start_time)" | bc -l )
+    
+  printf "Build Time: %.4fs\n" "$build_time" 
+  printf "%.4f\n" "$build_time" >> misc/build-time.metric
+}
+# NOTE(Ryan): This will run even if build is interrupted
+# trap print_end_time EXIT
+
+
+if [[ "$OSTYPE" == "linux-gnu" ]]; then
+  os="linux"
+else
+  printf "Error: Build currently only supports linux\n" >&2
+  exit 1
+fi
+
+# NOTE(Ryan): This file is ignored by source control to allow tweaking of build params without affecting history
+source "private/build-params"
+param_compiler=${param_compiler:-"g++"}
+param_mode=${param_mode:-"debug"}
+param_arch=${param_arch:-"x86_64"}
+param_verbose=${param_verbose:-"0"}
+
+mkdir -p build run
+
+compiler_flags=()
+linker_flags=()
+
+if [[ "$param_arch" == "x86_64" && "$param_compiler" == "g++" && "$os" == "linux" ]]; then
+  # NOTE(Ryan): Enable various warnings largely related to implicit signed, alignment, casting, promotion issues
+  compiler_flags+=( "-Wall" "-Wextra" "-Wshadow" "-Wconversion" "-Wdouble-promotion" "-Wformat=2" "-pedantic" )
+  compiler_flags+=( "-Wundef" "-Wshadow" "-Wpadded" "-fno-common" "-march=native" )
+  compiler_flags+=( "-Wfloat-equal" "-Wlogical-op" "-Wredundant-decls" "-Wstrict-overflow=2" "-Warray-bounds=2" )
+  compiler_flags+=( "-Wwrite-strings" "-Wpointer-arith" "-Wformat-truncation" "-Wmissing-include-dirs" )
+  compiler_flags+=( "-Wcast-align" "-Wswitch-enum" "-Wsign-conversion" "-Wdisabled-optimization" )
+  compiler_flags+=( "-Winline" "-Wmissing-declarations" "-Wdouble-promotion" "-Wshadow" "-Wtrampolines" )
+  compiler_flags+=( "-Wvector-operation-performance" "-Wnull-dereference" "-Winvalid-pch" )
+  compiler_flags+=( "-Wduplicated-cond" "-Wshift-overflow=2" "-Wcast-align=strict" )
+
+  # NOTE(Ryan): Display the specific warning flag so we can ignore it if needed
+  compiler_flags+=( "-fdiagnostics-show-option")
+
+  # NOTE(Ryan): Ignored warnings
+  compiler_flags+=( "-Wno-unknown-pragmas" "-Wno-missing-field-initializers" "-Wno-cast-align" "-Wno-useless-cast" "-Wno-comment" "-Wno-missing-declarations" )
+  compiler_flags+=( "-Wno-parentheses" "-Wno-conversion" "-Wno-padded")
+
+  # TODO(Ryan): Perhaps disable some cast types and keep some, e.g. -Wdouble-promotion
+
+  # NOTE(Ryan): C++ specific
+  compiler_flags+=( "-std=c++2a" "-fno-exceptions" "-fno-rtti" "-Wctor-dtor-privacy" )
+  compiler_flags+=( "-Wstrict-null-sentinel" "-Wzero-as-null-pointer-constant" )
+
+  # compiler_flags+=( "-isystem external/raylib/src" )
+  #compiler_flags+=( "-Lexternal/raylib/src" "-Wl,-rpath=external/raylib/src" )
+
+  linker_flags+=( "-lm" "-ldl" )
+
+  if [[ "$param_mode" == "debug" ]]; then
+    compiler_flags+=( "-DDEBUG_BUILD" )
+
+    # NOTE(Ryan): -g3 gives macro definitions
+    compiler_flags+=( "-g3" "-gdwarf-2" "-O0" )
+    compiler_flags+=("-Wno-unused-function" "-Wno-unused-variable"  "-Wno-unused-but-set-variable" )
+    compiler_flags+=("-Wno-unused-parameter" "-Wno-unused-result" "-Wno-vla" )
+    compiler_flags+=("-Wno-double-promotion" "-Wno-sign-conversion" )
+
+    # NOTE(Ryan): Sanitisers
+    # compiler_flags+=( "-fsanitize=address,undefined" "-fno-sanitize=float-divide-by-zero,float-cast-overflow" "-fno-sanitize-recover=all" )
+    # NOTE(Ryan): Static analyser
+    # compiler_flags+=( "-fanalyzer" )
+    
+    if [[ "$param_verbose" == "1" ]]; then
+      # TODO(Ryan): Won't print compiler errors
+      #compiler_output=$( { set -x; g++ "${compiler_flags[@]}" "$app_name".cpp -o build/"$app_name" "${linker_flags[@]}"; } 2>&1 )
+      compiler_output=$( { set -x; build_app compiler_flags linker_flags; } 2>&1 )
+
+      # NOTE(Ryan): Overcome Vim quickfix window line character limitation
+      line_demarcation=900
+      first_line="${compiler_output:0:$line_demarcation}"
+      for ((i=$((line_demarcation - 100)); i < $line_demarcation; i++)); do
+        ch="${first_line:i:1}"
+        # NOTE(Ryan): Ensure don't split lines during text
+        if [[ "$ch" == " " ]]; then
+          line_demarcation=$i
+          break
+        fi
+      done
+      first_line="${compiler_output:0:$line_demarcation}"
+      second_line="${compiler_output:$((line_demarcation + 1))}"
+      printf "%s\n%s\n" "$first_line" "$second_line"
+    else
+      build_app compiler_flags linker_flags
+      # g++ ${compiler_flags[*]} "$app_name".cpp -o build/"$app_name" ${linker_flags[*]}
+    fi
+
+    #g++ ${compiler_flags[*]} code/app.cpp -shared -fPIC -o run/app.so ${linker_flags[*]}
+
+    print_end_time
+
+    run_app
+    #push_dir run
+    ## NOTE(Ryan): Remove ascii colour escape sequences for Vim quickfix window
+    #time ../build/"$app_name" | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGK]//g"
+    #pop_dir
+  elif [[ "$param_mode" == "release" ]]; then
+    compiler_flags+=( "-DRELEASE_BUILD" )
+    compiler_flags+=( "-O3" )
+    compiler_flags+=( "-ffunction-sections" "-fdata-sections" ) 
+
+    compiler_flags+=( "-flto" )
+    # NOTE(Ryan): Pointer analysis; large compile times
+    compiler_flags+=( "-fipa-pta" )
+    compiler_flags+=( "-fdevirtualize-at-ltrans" )
+    linker_flags+=( "-Wl,--gc-sections" )
+
+    build_app compiler_flags linker_flags
+
+  else
+    printf "Error: Build currently only supports debug and release modes\n" >&2
+    exit 1
+  fi
+else
+  printf "Error: Build currently only supports x86_64 g++ on linux\n" >&2
+  exit 1
+fi
+
