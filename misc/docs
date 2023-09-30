@@ -1,0 +1,5 @@
+#!/bin/bash
+
+hardware_reference_page=161
+
+okular -p $hardware_reference_page "8086_family_Users_Manual_1_.pdf"

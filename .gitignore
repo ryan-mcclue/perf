@@ -6,6 +6,6 @@
 
 !.gitignore
 
-!*.cpp
+!**/*.cpp
 !misc/**/*
-!listings/**/*.asm
+!listings/**/*
