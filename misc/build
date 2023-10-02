@@ -63,7 +63,9 @@ if [[ "$param_arch" == "x86_64" && "$param_compiler" == "g++" && "$os" == "linux
 
   # NOTE(Ryan): Ignored warnings
   compiler_flags+=( "-Wno-unknown-pragmas" "-Wno-missing-field-initializers" "-Wno-cast-align" "-Wno-useless-cast" "-Wno-comment" "-Wno-missing-declarations" )
-  compiler_flags+=( "-Wno-parentheses" "-Wno-conversion" "-Wno-padded" "-Wno-write-strings" )
+  compiler_flags+=( "-Wno-parentheses" "-Wno-conversion" "-Wno-padded" "-Wno-write-strings" "-Wno-strict-aliasing" "-Wno-sign-conversion" "-Wno-unused-function" "-Wno-null-dereference" )
+  # IMPORTANT(Ryan): sign conversion warnings perhaps better for linting as often just a hindrance
+  # IMPORTANT(Ryan): null dereference also as doesn't take into account for arenas not failing 
 
   # TODO(Ryan): Perhaps disable some cast types and keep some, e.g. -Wdouble-promotion
 

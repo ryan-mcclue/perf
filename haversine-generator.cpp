@@ -45,14 +45,14 @@ parse_arguments(String8List args)
 
 #define F64_EARTH_RADIUS 6372.8
 INTERNAL f64
-haversine(Vec2F64 p0, Vec2F64 p1)
+haversine(f64 x0, f64 y0, f64 x1, f64 y1)
 {
   f64 result = 0.0;
 
-  f64 lat_diff = F64_DEG_TO_RAD(p1.x - p0.x);
-  f64 long_diff = F64_DEG_TO_RAD(p1.y - p0.y);
-  f64 lat0 = F64_DEG_TO_RAD(p0.x);
-  f64 lat1 = F64_DEG_TO_RAD(p1.x);
+  f64 lat_diff = F64_DEG_TO_RAD(x1 - x0);
+  f64 long_diff = F64_DEG_TO_RAD(y1 - y0);
+  f64 lat0 = F64_DEG_TO_RAD(x0);
+  f64 lat1 = F64_DEG_TO_RAD(x1);
 
   f64 inner = SQUARE(F64_SIN(lat_diff / 2)) + \
           F64_COS(lat0) * F64_COS(lat1) * SQUARE(F64_SIN(long_diff / 2));
@@ -60,6 +60,18 @@ haversine(Vec2F64 p0, Vec2F64 p1)
   result = 2.0 * F64_EARTH_RADIUS * F64_ASIN(F64_SQRT(inner));
 
   return result;
+}
+
+INTERNAL f64
+rand_degree(u64 *seed, f64 centre, f64 radius, f64 max_allowed)
+{
+  f64 min = centre - radius; 
+  if (min < -max_allowed) min = -max_allowed;
+
+  f64 max = centre + radius;
+  if (max > max_allowed) max = max_allowed;
+
+  return f64_rand_range(seed, min, max);
 }
 
 int
@@ -83,36 +95,51 @@ main(int argc, char *argv[])
   Arguments args = parse_arguments(args_list);
 
   String8List output = ZERO_STRUCT;
-  str8_list_push(perm_arena, &output, str8_lit("\"{ \"pairs\": [\n"));
+  str8_list_push(perm_arena, &output, str8_lit("{ \"pairs\": [\n"));
 
-  u64 seed = linux_get_seed_u64();
-  u64 cluster_roll = 1 + (args.num_pairs / 64);
+  u64 seed = linux_get_seed();
+  f64 max_lat = 90.0;
+  f64 max_long = 180.0;
+  f64 cluster_lat = 0.0, cluster_long = 0.0, cluster_r = 0.0;
+  u64 cluster_roll = 0;
+  u64 cluster_size = 1 + (args.num_pairs / 64);
+
+  MemArenaTemp temp = mem_arena_temp_begin(NULL, 0);
+
+  f64 avg_coeff = 1.0 / args.num_pairs;
+  f64 avg = 0.0;
   for (u64 i = 0; i < args.num_pairs; i += 1)
   {
-     
+    if (cluster_roll == 0) 
+    {
+      cluster_lat = f64_rand_range(&seed, -max_lat, max_lat);
+      cluster_long = f64_rand_range(&seed, -max_long, max_long);
+      cluster_r = f64_rand_range(&seed, 0, max_lat);
+    }
+
+    f64 rand_lat0 = rand_degree(&seed, cluster_lat, cluster_r, max_lat);
+    f64 rand_lat1 = rand_degree(&seed, cluster_lat, cluster_r, max_lat);
+    f64 rand_long0 = rand_degree(&seed, cluster_long, cluster_r, max_long);
+    f64 rand_long1 = rand_degree(&seed, cluster_long, cluster_r, max_long);
+
+    f64 d = haversine(rand_lat0, rand_long0, rand_lat1, rand_long1);
+    avg += avg_coeff * d;
+
+    String8 entry = str8_fmt(temp.arena, "{ \"x0\": %.16f, \"y0\": %.16f, \"x1\": %.16f, \"y1\": %.16f}%c\n", 
+                             rand_lat0, rand_long0, rand_lat1, rand_long1, (i == args.num_pairs - 1) ? ' ' : ',');
+    str8_list_push(perm_arena, &output, entry);
+
+    cluster_roll += 1;
+    if (cluster_roll == cluster_size) cluster_roll = 0;
   }
 
-  str8_list_push(perm_arena, &output, str8_lit("]}\""));
+  mem_arena_temp_end(temp);
+
+  str8_list_push(perm_arena, &output, str8_lit("]}"));
   String8 output_merge = str8_list_join(perm_arena, output, NULL);
   str8_write_entire_file(args.output_file, output_merge);
 
-  return 0;
-}
+  printf("pairs: %d, avg: %.16f\n", args.num_pairs, avg);
 
-static f64 RandomDegree(random_series *Series, f64 Center, f64 Radius, f64 MaxAllowed)
-{
-    f64 MinVal = Center - Radius;
-    if(MinVal < -MaxAllowed)
-    {
-        MinVal = -MaxAllowed;
-    }
-    
-    f64 MaxVal = Center + Radius;
-    if(MaxVal > MaxAllowed)
-    {
-        MaxVal = MaxAllowed;
-    }
-    
-    f64 Result = RandomInRange(Series, MinVal, MaxVal);
-    return Result;
+  return 0;
 }
