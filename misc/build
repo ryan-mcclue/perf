@@ -9,7 +9,7 @@ fi
 
 BUILD_TYPE="$1"
 
-app_name="haversine-generator"
+app_name="haversine"
 
 build_start_time=$(date +%s.%N)
 
@@ -36,7 +36,7 @@ else
 fi
 
 # NOTE(Ryan): This file is ignored by source control to allow tweaking of build params without affecting history
-source "private/build-params"
+[[ -f "private/build-params" ]] && source "private/build-params"
 param_compiler=${param_compiler:-"g++"}
 param_mode=${param_mode:-"debug"}
 param_arch=${param_arch:-"x86_64"}
