@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: zlib-acknowledgement
 
+/* https://www.youtube.com/watch?v=ddfSDIzIbdE&t=591s 
+ * Put arena here as want all memory here to be contiguous
+ * struct something {
+ *   MemArena *a;
+ * }
+ */
+
 #include "base-inc.h"
 
-typedef struct Arguments
+#include "parser.cpp"
+
+typedef struct Arguments Arguments;
+struct Arguments
 {
   u32 num_pairs;
   String8 output_file;
-} Arguments;
+};
 #define ARGS_MAX_PAIRS MILLION(10)
 
 INTERNAL Arguments
@@ -74,37 +84,8 @@ rand_degree(u64 *seed, f64 centre, f64 radius, f64 max_allowed)
   return f64_rand_range(seed, min, max);
 }
 
-typedef enum
-{
-  TOKEN_TYPE_NULL = 0, 
-  TOKEN_TYPE_KEYWORD, // true/false/null
-  TOKEN_TYPE_SEMICOLON,
-} TOKEN_TYPE;
 
-typedef struct
-{
-  TOKEN_TYPE type;
-  Rng1U64 range;
-} Token;
-
-typedef struct
-{
-  TokenNode *next;
-  Token token;
-} TokenNode;
-
-typedef struct
-{
-  TokenNode *first, *last;
-  u64 count;
-} TokenList;
-
-typedef struct
-{
-  Token *tokens;
-  u64 count;
-} TokenArray;
-
+#if 0
 void parse(void)
 {
   if (recognise_token(TOKEN_BRACE_OPEN)) advance_token(); parse_array();
@@ -115,6 +96,30 @@ void parse(void)
     else if (recognise_token(TOKEN_INTEGER)) advance_token();
   }
   require_token(TOKEN_SEMICOLON);
+}
+
+INTERNAL void
+parse(FileData *data)
+{
+  String8 text = data->text; 
+  TokenArray token_array = data->token_array;
+
+  for (u32 i = 0; i < token_array.count; i += 1)
+  {
+    Token *token = &token_array.tokens[i];
+    String8 token_str = str8_substr(text, token->start, token->end);
+  }
+}
+
+INTERNAL void
+bool expect_token(TokenKind kind) {
+  if (is_token(kind)) {
+    next_token();
+    return true;
+  } else {
+    fatal_error_here("Expected token %s, got %s", token_kind_name(kind), token_info());
+    return false;
+  }
 }
 
 INTERNAL TokenArray
@@ -133,77 +138,9 @@ token_list_to_array(MemArena *arena, TokenList *list)
 
   return array;
 }
+#endif
 
 
-
-
-
-
-INTERNAL TokenArray
-get_token_array(MemArena *arena, String8 str)
-{
-  MemArenaTemp temp = mem_arena_temp_begin(arena, 1);
-
-  TokenList tokens = ZERO_STRUCT; // ??
-
-  TOKEN_TYPE active_token_type = TOKEN_TYPE_NULL;
-  u64 active_token_start_offset = 0;
-
-  u64 offset = 0;
-  u64 advance = 0;
-  char ch = str.content[offset];
-  while (offset <= str.size)
-  {
-    advance = (active_token_type != NULL) ? 1 : 0;
-
-    switch (active_token_type)
-    {
-      case TOKEN_TYPE_NULL:
-      {
-        if (ch == '\n')
-        {
-          active_token_type = TOKEN_TYPE_NEWLINE;
-          active_token_start_offset = offset;
-          advance = 0; // why zero?
-        }
-        else if (ch == ' ' || ch == '\t')
-        {
-
-        }
-      } break;
-      default:
-      {
-
-      }
-    }
-
-    if (ender_found != 0)
-    {
-      Token token = {active_token_type, rng1_u32(active_token_start_off, offset + advance)};
-      CL_TokenChunkListPush(arena, &tokens, 1024, &token);
-      // token_list_push()
-      active_token_kind = CL_TokenKind_Null;
-      active_token_start_off = token.range.max;
-    }
-
-    offset += advance;
-  }
-
-  TokenArray result = token_array_from_list();
-
-  mem_arena_temp_end(temp);
-}
-
-INTERNAL void
-bool expect_token(TokenKind kind) {
-  if (is_token(kind)) {
-    next_token();
-    return true;
-  } else {
-    fatal_error_here("Expected token %s, got %s", token_kind_name(kind), token_info());
-    return false;
-  }
-}
 
 
 // require() functions for parser?
@@ -214,63 +151,6 @@ bool expect_token(TokenKind kind) {
 // if (str8_match_array(str, keyword_args)) token->type = Keyword
 // https://www.youtube.com/watch?v=pKZ_p3lmHfk
 
-INTERNAL void
-parse(FileData *data)
-{
-  String8 text = data->text; 
-  TokenArray token_array = data->token_array;
-
-  for (u32 i = 0; i < token_array.count; i += 1)
-  {
-    Token *token = &token_array.tokens[i];
-    String8 token_str = str8_substr(text, token->start, token->end);
-  }
-
-}
-
-
-typedef struct
-{
-  String8 text;  
-  u64 at;
-  u64 line;
-  u64 bol; // beginning of line
-  // b32 error;
-} Lexer;
-
-INTERNAL Lexer 
-lexer_new(String8 text)
-{
-  Lexer lex = ZERO_STRUCT;
-  lex.text = text;
-  return lex;
-}
-
-INTERNAL void
-lexer_consume_whitespace_left(Lexer *l)
-{
-
-}
-
-INTERNAL Token
-lexer_next(Lexer *l)
-{
-  lexer_consume_whitespace_left(l);
-
-  Token token = ZERO_STRUCT;
-  token.text.content = &l->text.content[l->at];
-
-  if (l->at >= l->text.size) return token;
-
-  if (l->text.content[l->at] == '#')
-  {
-    token.type = TOKEN_TYPE_HASH;
-    token.text.size = 1;
-    l->at += 1;
-  }
-
-  return token;
-}
 
 // IMPORTANT(Ryan): Index checking! str8_in_bounds(str, i);
 // ProfScope("%.*s", Str8VArg(path)) {}
