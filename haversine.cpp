@@ -121,23 +121,6 @@ bool expect_token(TokenKind kind) {
     return false;
   }
 }
-
-INTERNAL TokenArray
-token_list_to_array(MemArena *arena, TokenList *list)
-{
-  TokenArray array = ZERO_STRUCT;
-  array.count = list->count;
-  array.tokens = MEM_ARENA_PUSH_ARRAY(arena, Token, array.count);
-
-  u64 i = 0;
-  for (TokenNode *n = list->first; n != NULL; n = n->next)
-  {
-    MEMORY_COPY(array.tokens + i, n->token, sizeof(Token));
-    i += 1;
-  }
-
-  return array;
-}
 #endif
 
 
@@ -155,8 +138,6 @@ token_list_to_array(MemArena *arena, TokenList *list)
 // IMPORTANT(Ryan): Index checking! str8_in_bounds(str, i);
 // ProfScope("%.*s", Str8VArg(path)) {}
 // ProfScope("load & lex all C files") {}
-
-// c_file->tokens = CL_TokenArrayFromString(mg_arena, c_file->data);
 
 int
 main(int argc, char *argv[])
@@ -177,6 +158,23 @@ main(int argc, char *argv[])
   }
 
   Arguments args = parse_arguments(args_list);
+
+  String8 file = str8_read_entire_file(perm_arena, str8_lit("example.lang"));
+  ASSERT(file.size != 0);
+  TokenArray tokens = get_token_array(perm_arena, file);
+
+  PRINT_U64(tokens.count);
+  for (u64 i = 0; i < tokens.count; i += 1)
+  {
+    Token token = tokens.tokens[i];
+    switch (token.type)
+    {
+#define CASE(n) case TOKEN_TYPE_##n: puts("TOKEN_TYPE_" #n); break
+      CASE(NEWLINE);
+      CASE(WHITESPACE);
+#undef CASE
+    }
+  }
 
   return 0;
 }

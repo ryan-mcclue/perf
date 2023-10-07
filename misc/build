@@ -90,6 +90,7 @@ if [[ "$param_arch" == "x86_64" && "$param_compiler" == "g++" && "$os" == "linux
     compiler_flags+=("-Wno-unused-function" "-Wno-unused-variable"  "-Wno-unused-but-set-variable" )
     compiler_flags+=("-Wno-unused-parameter" "-Wno-unused-result" "-Wno-vla" )
     compiler_flags+=("-Wno-double-promotion" "-Wno-sign-conversion" )
+    compiler_flags+=( "-Wno-switch-enum" "-Wno-switch" ) 
 
     # NOTE(Ryan): Sanitisers
     # compiler_flags+=( "-fsanitize=address,undefined" "-fno-sanitize=float-divide-by-zero,float-cast-overflow" "-fno-sanitize-recover=all" )
