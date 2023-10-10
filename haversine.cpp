@@ -99,19 +99,6 @@ void parse(void)
 }
 
 INTERNAL void
-parse(FileData *data)
-{
-  String8 text = data->text; 
-  TokenArray token_array = data->token_array;
-
-  for (u32 i = 0; i < token_array.count; i += 1)
-  {
-    Token *token = &token_array.tokens[i];
-    String8 token_str = str8_substr(text, token->start, token->end);
-  }
-}
-
-INTERNAL void
 bool expect_token(TokenKind kind) {
   if (is_token(kind)) {
     next_token();

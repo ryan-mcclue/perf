@@ -3,11 +3,14 @@
 typedef enum
 {
   TOKEN_TYPE_NULL = 0, 
-  TOKEN_TYPE_NEWLINE,
+   TOKEN_TYPE_NEWLINE,
   TOKEN_TYPE_ERROR,
-  TOKEN_TYPE_WHITESPACE,
-  TOKEN_TYPE_IDENTIFIER,
-  TOKEN_TYPE_SYMBOL,
+   TOKEN_TYPE_WHITESPACE,
+   TOKEN_TYPE_IDENTIFIER,
+   TOKEN_TYPE_SYMBOL,
+  TOKEN_TYPE_OPEN_BRACE,
+  TOKEN_TYPE_CLOSE_BRACE,
+  TOKEN_TYPE_COLON,
   TOKEN_TYPE_STRING_LITERAL,
   TOKEN_TYPE_NUMERIC_LITERAL,
 
@@ -19,6 +22,11 @@ struct Token
 {
   TOKEN_TYPE type;
   RangeU64 range;
+};
+
+GLOBAL Token global_null_token = {
+  TOKEN_TYPE_NULL,
+  ZERO_STRUCT
 };
 
 typedef struct TokenNode TokenNode;
@@ -154,3 +162,164 @@ get_token_array(MemArena *arena, String8 str)
 
   return result;
 }
+
+typedef enum
+{
+  JSON_NODE_TYPE_ARRAY,
+  JSON_NODE_TYPE_OBJECT,
+  JSON_NODE_TYPE_STRING,
+  JSON_NODE_TYPE_NUMBER,
+  JSON_NODE_TYPE_BOOLEAN,
+  JSON_NODE_TYPE_NULL,
+
+  JSON_NODE_TYPE_COUNT,
+} JSON_NODE_TYPE;
+
+typedef struct JsonNode JsonNode;
+struct JsonNode
+{
+  JSON_NODE_TYPE type;
+  String8 label;
+  union
+  {
+    b32 boolean;
+    f32 number;
+    String8 string;
+    JsonNode *first_child;
+  };
+
+  JsonNode *next;
+};
+
+INTERNAL char *
+token_get_type(TOKEN_TYPE type)
+{
+  switch (type)
+  {
+#define CASE(n) case TOKEN_TYPE_##n: return "TOKEN_TYPE_" #n; break
+    CASE(IDENTIFIER);
+    CASE(OPEN_BRACKET);
+    CASE(CLOSE_BRACKET);
+    CASE(IDENTIFER);
+    CASE(COLON);
+    CASE(STRING_LITERAL);
+    CASE(NUMERIC_LITERAL);
+#undef CASE
+  }
+}
+
+INTERNAL void
+token_expect_error(TOKEN_TYPE type)
+{
+  printf("Error: Expected type %s\n", token_get_type(type));
+  exit(1);
+}
+
+INTERNAL void
+advance_token(Token **token, Token *token_opl, u32 inc)
+{
+  if (*token + inc < token_opl) *token += inc;
+  else *token = &global_null_token;
+}
+
+INTERNAL void
+expect_next_token(Token **token, Token *token_opl, TOKEN_TYPE type)
+{
+  advance_token(token, token_opl, 1);
+  if (token->type != type) token_expect_error(type);
+}
+
+INTERNAL JsonNode *
+parse_token_json_object(String8 data, Token **token, Token *token_opl)
+{
+  JsonNode *first_child, *last_child = NULL;
+
+  while (token < token_opl)
+  {
+    expect_next_token(token, token_opl, TOKEN_TYPE_STRING_LITERAL);
+    String8 label = str8_range_u64(data, token->range);
+
+    expect_next_token(token, token_opl, TOKEN_TYPE_COLON);
+
+    advance_token(token, token_opl, 1);
+
+    JsonNode *child = parse_token_json(data, label, token, token_opl);
+    if (child != NULL) SLL_QUEUE_PUSH(first_child, last_child, child);
+
+    if (token->type == TOKEN_TYPE_CLOSE_BRACE) break;
+    else if (token->type != TOKEN_TYPE_COMMA) token_expect_error(TOKEN_TYPE_COMMA);
+  }
+
+  return first_child;
+
+#undef ADVANCE_TOKEN
+}
+
+#if 0
+INTERNAL JsonNode *
+parse_token_json(String8 data, String8 label, Token *token, Token *token_opl)
+{
+  String8 token_str = str8_range(data, token->range);
+
+  JsonNode *first_child = NULL;
+  b32 valid = true;
+  if (token->type == TOKEN_TYPE_OPEN_BRACKET)
+  {
+    first_child = parse_token_json_object(data, token, token_opl);
+  }
+  else if (token->type == TOKEN_TYPE_NUMERIC_LITERAL)
+  {
+
+  }
+  else if (token->type == TOKEN_TYPE_STRING_LITERAL)
+  {
+
+  }
+  else if (token->type == TOKEN_TYPE_IDENTIFIER)
+  {
+
+  }
+  else
+  {
+    valid = false;
+  }
+  
+  // base case is if the element is standalone
+  if (valid)
+  {
+    JsonNode *result = MEM_ARENA_PUSH_STRUCT_ZERO(arena, JsonNode);
+    result->label = label;// will only have label if object
+    result->value = value; // unionify
+    result->first_child = first_child;
+  }
+  else
+  {
+    return NULL;
+  }
+}
+
+INTERNAL JsonNode *
+parse_tokens_json(String8 data, TokenArray *tokens)
+{
+  Token *token_opl = tokens->tokens + tokens->count;
+  JsonNode *root = parse_token_json(data, tokens->tokens, token_opl);
+}
+
+INTERNAL JsonNode *
+lookup_json_label(JsonNode *node, String8 label)
+{
+  JsonNode *result = NULL;
+
+  for (JsonNode *n = node; n != NULL; n = n->next)
+  {
+    if (str8_match(n->label, label, 0)) return n;
+  }
+
+  return result;
+}
+#endif
+
+// Instead of printing intermittedly, return message_list in result struct?
+
+// functional programming involves managing a lot of complexity
+// e.g. function return value pair, but one item could be multiple types to indicate error etc.
