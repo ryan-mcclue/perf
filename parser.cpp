@@ -232,7 +232,7 @@ expect_next_token(Token **token, Token *token_opl, TOKEN_TYPE type)
 INTERNAL JsonNode *
 parse_token_json_object(String8 data, Token **token, Token *token_opl)
 {
-  JsonNode *first_child, *last_child = NULL;
+  JsonNode *first_child = NULL, *last_child = NULL;
 
   while (token < token_opl)
   {
@@ -243,6 +243,10 @@ parse_token_json_object(String8 data, Token **token, Token *token_opl)
 
     advance_token(token, token_opl, 1);
 
+    expect_next_token(token, token_opl, TOKEN_TYPE_STRING_LITERAL);
+    String8 label = str8_range_u64(data, token->range);
+
+    expect_next_token(token, token_opl, TOKEN_TYPE_COLON);
     JsonNode *child = parse_token_json(data, label, token, token_opl);
     if (child != NULL) SLL_QUEUE_PUSH(first_child, last_child, child);
 
@@ -251,8 +255,26 @@ parse_token_json_object(String8 data, Token **token, Token *token_opl)
   }
 
   return first_child;
+}
 
-#undef ADVANCE_TOKEN
+INTERNAL JsonNode *
+parse_token_json_array(String8 data, Token **token, Token *token_opl)
+{
+  JsonNode *first_child = NULL, *last_child = NULL;
+
+  while (token < token_opl)
+  {
+    String8 label = ZERO_STRUCT;
+    advance_token(token, token_opl, 1);
+
+    JsonNode *child = parse_token_json(data, label, token, token_opl);
+    if (child != NULL) SLL_QUEUE_PUSH(first_child, last_child, child);
+
+    if (token->type == TOKEN_TYPE_CLOSE_BRACKET) break;
+    else if (token->type != TOKEN_TYPE_COMMA) token_expect_error(TOKEN_TYPE_COMMA);
+  }
+
+  return first_child;
 }
 
 #if 0
@@ -302,7 +324,8 @@ INTERNAL JsonNode *
 parse_tokens_json(String8 data, TokenArray *tokens)
 {
   Token *token_opl = tokens->tokens + tokens->count;
-  JsonNode *root = parse_token_json(data, tokens->tokens, token_opl);
+  String8 empty_label = ZERO_STRUCT;
+  JsonNode *root = parse_token_json(data, empty_label, tokens->tokens, token_opl);
 }
 
 INTERNAL JsonNode *

@@ -7,9 +7,12 @@
  * }
  */
 
+// https://codeberg.org/rhighs/haversine/src/branch/master/benchmark.h 
+
 #include "base-inc.h"
 
-#include "parser.cpp"
+// #include "parser.cpp"
+#include "rdtsc.cpp"
 
 typedef struct Arguments Arguments;
 struct Arguments
@@ -129,6 +132,8 @@ bool expect_token(TokenKind kind) {
 int
 main(int argc, char *argv[])
 {
+  profiler_init();
+
   global_debugger_present = linux_was_launched_by_gdb();
   MemArena *perm_arena = mem_arena_allocate_default();
 
@@ -139,13 +144,19 @@ main(int argc, char *argv[])
   linux_set_cwd_to_self();
 
   String8List args_list = ZERO_STRUCT;
-  for (s32 i = 1; i < argc; i += 1)
+  PROFILE_BLOCK("Arguments to linked list")
   {
-    str8_list_push(perm_arena, &args_list, str8_cstr(argv[i]));
+    for (s32 i = 1; i < argc; i += 1)
+    {
+      str8_list_push(perm_arena, &args_list, str8_cstr(argv[i]));
+    }
   }
 
   Arguments args = parse_arguments(args_list);
 
+  profiler_end_and_print();
+
+#if 0
   String8 file = str8_read_entire_file(perm_arena, str8_lit("example.lang"));
   ASSERT(file.size != 0);
   TokenArray tokens = get_token_array(perm_arena, file);
@@ -162,6 +173,10 @@ main(int argc, char *argv[])
 #undef CASE
     }
   }
+#endif
+
 
   return 0;
 }
+
+STATIC_ASSERT(__COUNTER__ <= ARRAY_COUNT(global_profiler.slots));
