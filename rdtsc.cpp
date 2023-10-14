@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: zlib-acknowledgement
 
+// IMPORTANT(Ryan): USE EXCEL FOR GRAPH CREATION OVER GNUPLOT!
+
 // a course measurement like a total runtime is only useful as a final measurement
 // want more granular, to identify slow parts 
 
@@ -28,96 +30,146 @@
 
 // instrumentation profiling is adding timing code
 
-typedef struct ProfileSlot ProfileSlot;
-struct ProfileSlot
-{
-  u64 elapsed;
-  u64 elapsed_children;
-  u64 hit_count;
-  char *label;
-};
+// want way to modularly bring in module to see how it affects program runtime
+// anything called say 1mil. times will always give a performance penalty
+// to time function with no nested overheads, just TIME_BLOCK("S") { func() };
 
-typedef struct Profiler Profiler;
-struct Profiler
-{
-  ProfileSlot slots[4096];
-  u64 start;
-  u64 end;
-};
+#if defined(PROFILER)
+  #define PROFILER_END_OF_COMPILATION_UNIT \
+    STATIC_ASSERT(__COUNTER__ <= ARRAY_COUNT(global_profiler.slots))
+  #define PROFILE_BLOCK(name) \
+    for (struct {ProfileEphemeral e; u32 i;} UNIQUE_NAME(l) = {profile_block_start(name, __COUNTER__ + 1), 0}; \
+         UNIQUE_NAME(l).i == 0; \
+         profile_block_end(&(UNIQUE_NAME(l)).e), UNIQUE_NAME(l).i++)
+  #define PROFILE_FUNCTION() \
+    PROFILE_BLOCK(__func__)
 
-typedef struct ProfileEphemeral ProfileEphemeral;
-struct ProfileEphemeral
-{
-  char *label;
-  u64 start;
-  u32 slot_index; 
-};
-
-GLOBAL Profiler global_profiler;
-GLOBAL u32 global_parent_slot_index;
-
-INTERNAL void
-profiler_init(void)
-{
-  global_profiler.start = __rdtsc();
-}
-
-INTERNAL ProfileEphemeral
-profile_block_start(char *label, u32 slot_index)
-{
-  ProfileEphemeral ephemeral = ZERO_STRUCT;
-  ephemeral.slot_index = slot_index;
-
-  ephemeral.label = label;
-
-  ephemeral.start = __rdtsc();
-
-  global_parent_slot_index = slot_index;
-
-  return ephemeral;
-}
-
-INTERNAL u32
-profile_block_end(ProfileEphemeral *ephemeral)
-{
-  u64 elapsed = __rdtsc() - ephemeral->start; 
-
-  ProfileSlot *parent_slot = global_profiler.slots + global_parent_slot_index;
-  parent_slot->elapsed_children += elapsed;
-
-  ProfileSlot *slot = global_profiler.slots + ephemeral->slot_index;
-  slot->elapsed += elapsed;
-  slot->hit_count++;
-  slot->label = ephemeral->label;
-
-  return 0;
-}
-
-#define PROFILE_BLOCK(name) \
-  for (struct {ProfileEphemeral e; u32 i;} UNIQUE_NAME(l) = {profile_block_start(name, __COUNTER__), 0}; \
-       UNIQUE_NAME(l).i == 0; \
-       profile_block_end(&(UNIQUE_NAME(l)).e), UNIQUE_NAME(l).i++)
-#define PROFILE_FUNCTION() \
-  PROFILE_BLOCK(__func__)
-
-INTERNAL void
-profiler_end_and_print(void)
-{
-  u64 cpu_freq = linux_estimate_cpu_timer_freq();
-  u64 total = __rdtsc() - global_profiler.start;
-  if (cpu_freq)
+  typedef struct ProfileSlot ProfileSlot;
+  struct ProfileSlot
   {
-    printf("\nTotal time: %0.4fms (CPU freq %lu)\n", 1000.0 * (f64)total/(f64)cpu_freq, cpu_freq);
+    u64 elapsed_exclusive; // no children
+    u64 elapsed_inclusive; // children
+    u64 hit_count;
+    char *label;
+  };
+  
+  typedef struct Profiler Profiler;
+  struct Profiler
+  {
+    ProfileSlot slots[4096];
+    u64 start;
+    u64 end;
+  };
+  
+  typedef struct ProfileEphemeral ProfileEphemeral;
+  struct ProfileEphemeral
+  {
+    char *label;
+    u64 old_elapsed_inclusive;
+    u64 start;
+    u32 parent_slot_index;
+    u32 slot_index; 
+  };
+  
+  GLOBAL Profiler global_profiler;
+  GLOBAL u32 global_profiler_parent_slot_index;
+  
+  INTERNAL void
+  profiler_init(void)
+  {
+    global_profiler.start = __rdtsc();
+  }
+  
+  INTERNAL ProfileEphemeral
+  profile_block_start(char *label, u32 slot_index)
+  {
+    ProfileEphemeral ephemeral = ZERO_STRUCT;
+    ephemeral.slot_index = slot_index;
+    ephemeral.label = label;
+    ephemeral.parent_slot_index = global_profiler_parent_slot_index;
+  
+    ProfileSlot *slot = global_profiler.slots + slot_index;
+    ephemeral.old_elapsed_inclusive = slot->elapsed_inclusive;
+  
+    ephemeral.start = __rdtsc();
+  
+    return ephemeral;
+  }
+  
+  INTERNAL u32
+  profile_block_end(ProfileEphemeral *ephemeral)
+  {
+    u64 elapsed = __rdtsc() - ephemeral->start; 
+  
+    global_profiler_parent_slot_index = ephemeral->parent_slot_index;
+  
+    ProfileSlot *parent_slot = global_profiler.slots + ephemeral->parent_slot_index;
+    parent_slot->elapsed_exclusive -= elapsed;
+  
+    ProfileSlot *slot = global_profiler.slots + ephemeral->slot_index;
+    slot->elapsed_exclusive += elapsed;
+    slot->elapsed_inclusive = ephemeral->old_elapsed_inclusive + elapsed; // handle recursion; just overwrite what children wrote
+    slot->hit_count++;
+    slot->label = ephemeral->label;
+  
+    return 0;
+  }
+  
+  INTERNAL void
+  profiler_end_and_print(void)
+  {
+    u64 cpu_freq = linux_estimate_cpu_timer_freq();
+    u64 total = __rdtsc() - global_profiler.start;
+    if (cpu_freq)
+    {
+      printf("\nTotal time: %0.4fms (CPU freq %lu)\n", 1000.0 * (f64)total/(f64)cpu_freq, cpu_freq);
+    }
+  
+    for (u32 i = 1; i < ARRAY_COUNT(global_profiler.slots); i += 1)
+    {
+      ProfileSlot *slot = global_profiler.slots + i;
+      if (slot->hit_count == 0) break;
+  
+      f64 percent = 100.0 * ((f64)slot->elapsed_exclusive / (f64)total);
+      printf("  %s(%lu): %lu (%0.2f%%", slot->label, slot->hit_count, slot->elapsed_exclusive, percent);
+  
+      if (slot->elapsed_inclusive != slot->elapsed_exclusive)
+      {
+        f64 percent_with_children = 100.0 * ((f64)slot->elapsed_inclusive / (f64)total);
+        printf(", %.2f%% w/children", percent_with_children); 
+      }
+      printf(")\n");
+    }
+  }
+#else
+  #define PROFILER_END_OF_COMPILATION_UNIT
+  #define PROFILE_FUNCTION()
+  #define PROFILE_BLOCK(name)
+
+  typedef struct Profiler Profiler;
+  struct Profiler
+  {
+    u64 start;
+    u64 end;
+  };
+  
+  GLOBAL Profiler global_profiler;
+  
+  INTERNAL void
+  profiler_init(void)
+  {
+    global_profiler.start = __rdtsc();
   }
 
-  for (u32 i = 0; i < ARRAY_COUNT(global_profiler.slots); i += 1)
+  INTERNAL void
+  profiler_end_and_print(void)
   {
-    ProfileSlot *slot = global_profiler.slots + i;
-    if (slot->hit_count == 0) break;
-
-    u64 slot_total = slot->elapsed - slot->elapsed_children;
-    printf("  %s(%lu): %lu (%0.2f%%, %0.2f%%w/children)\n", slot->label, slot->hit_count, slot->elapsed, 
-           100.0 * (f64)slot_total / (f64)total,
-           100.0 * (f64)slot->elapsed / (f64)total);
+    u64 cpu_freq = linux_estimate_cpu_timer_freq();
+    u64 total = __rdtsc() - global_profiler.start;
+    if (cpu_freq)
+    {
+      printf("\nTotal time: %0.4fms (CPU freq %lu)\n", 1000.0 * (f64)total/(f64)cpu_freq, cpu_freq);
+    }
   }
-}
+#endif
+

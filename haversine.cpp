@@ -179,4 +179,4 @@ main(int argc, char *argv[])
   return 0;
 }
 
-STATIC_ASSERT(__COUNTER__ <= ARRAY_COUNT(global_profiler.slots));
+PROFILER_END_OF_COMPILATION_UNIT;
