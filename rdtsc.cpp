@@ -32,24 +32,54 @@
 
 // want way to modularly bring in module to see how it affects program runtime
 // anything called say 1mil. times will always give a performance penalty
+// so, ascertain overall profile, then remove until not affecting performance as much, e.g. nested block removals (essentially perform A/B testing)
 // to time function with no nested overheads, just TIME_BLOCK("S") { func() };
+
+// enum ARR_KEY
+// {
+//   ARR_KEY_TIMER,
+//   ARR_KEY_BYTES,
+//   ARR_KEY_COUNT
+// };
+// u32 arr[ARR_KEY_COUNT];
+
+INTERNAL u64 linux_page_fault_count(void)
+{
+  struct rusage usage = ZERO_STRUCT;
+  getrusage(RUSAGE_SELF, &usage);
+
+  // ru_minflt  the number of page faults serviced without any I/O activity.
+  // ru_majflt  the number of page faults serviced that required I/O activity.
+  u64 result = usage.ru_minflt + usage.ru_majflt;
+
+  return result;
+}
+// have a separate thread on startup that pre-touches memory (in a sense, prefetching), before saturating it with work
+
 
 #if defined(PROFILER)
   #define PROFILER_END_OF_COMPILATION_UNIT \
     STATIC_ASSERT(__COUNTER__ <= ARRAY_COUNT(global_profiler.slots))
   #define PROFILE_BLOCK(name) \
-    for (struct {ProfileEphemeral e; u32 i;} UNIQUE_NAME(l) = {profile_block_start(name, __COUNTER__ + 1), 0}; \
+    for (struct {ProfileEphemeral e; u32 i;} UNIQUE_NAME(l) = {profile_block_start(name, __COUNTER__ + 1, 0), 0}; \
          UNIQUE_NAME(l).i == 0; \
          profile_block_end(&(UNIQUE_NAME(l)).e), UNIQUE_NAME(l).i++)
   #define PROFILE_FUNCTION() \
     PROFILE_BLOCK(__func__)
+  #define PROFILE_BANDWIDTH(name, byte_count) \
+    for (struct {ProfileEphemeral e; u32 i;} UNIQUE_NAME(l) = {profile_block_start(name, __COUNTER__ + 1, byte_count), 0}; \
+         UNIQUE_NAME(l).i == 0; \
+         profile_block_end(&(UNIQUE_NAME(l)).e), UNIQUE_NAME(l).i++)
+  // PROFILE_BANDWIDTH("str8_read_entire_file", result.count);
 
+  // TODO(Ryan): This block profiler not appropriate for measuring small amounts of code?
   typedef struct ProfileSlot ProfileSlot;
   struct ProfileSlot
   {
     u64 elapsed_exclusive; // no children
     u64 elapsed_inclusive; // children
     u64 hit_count;
+    u64 byte_count;
     char *label;
   };
   
@@ -81,7 +111,7 @@
   }
   
   INTERNAL ProfileEphemeral
-  profile_block_start(char *label, u32 slot_index)
+  profile_block_start(char *label, u32 slot_index, u64 byte_count)
   {
     ProfileEphemeral ephemeral = ZERO_STRUCT;
     ephemeral.slot_index = slot_index;
@@ -90,6 +120,8 @@
   
     ProfileSlot *slot = global_profiler.slots + slot_index;
     ephemeral.old_elapsed_inclusive = slot->elapsed_inclusive;
+
+    slot->byte_count += byte_count;
   
     ephemeral.start = __rdtsc();
   
@@ -138,13 +170,23 @@
         f64 percent_with_children = 100.0 * ((f64)slot->elapsed_inclusive / (f64)total);
         printf(", %.2f%% w/children", percent_with_children); 
       }
-      printf(")\n");
+      printf(")");
+
+      if (slot->byte_count != 0)
+      {
+        f64 seconds = (f64)slot->elapsed_inclusive/(f64)cpu_freq;
+        f64 bps = (f64)slot->byte_count / seconds; 
+        // TODO(Ryan): gb/s often what striving for? 0.3-0.5gb/s for modern CPUs?
+        printf(" %.3fmb at %.2fgb/s", (f64)slot->byte_count / (f64)MB(1), bps / (f64)GB(1));
+      }
+      printf("\n");
     }
   }
 #else
   #define PROFILER_END_OF_COMPILATION_UNIT
   #define PROFILE_FUNCTION()
   #define PROFILE_BLOCK(name)
+  #define PROFILE_BANDWIDTH(name, byte_count)
 
   typedef struct Profiler Profiler;
   struct Profiler
