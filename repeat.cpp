@@ -21,9 +21,17 @@
 // in a sense, heirarchical memory structure, with OS managing pages, malloc giving chunks of those pages to you
 // OS lazily creates page mappings, e.g. on first allocation, will just return virtual addresss, no physical address assigned yet
 // so, on first writing to address, CPU will trigger a page fault as OS has not population translation table yet. OS will then populate table
+// linux large pages with mmap MAP_HUGETLB (perhaps easier with tunables, e.g. GLIBC_TUNABLES=glibc.malloc.hugetlb=2 ./executable)
 // (OS may mark 16 pages at a time, instead of 1 each time)
 // (TODO(Ryan): Page tables can be dropped in a device driver?)
 // (on linux, on reading first, will just return 0 page; so OS policies affect what happens on reads)
+// not necessarily contiguous in physical memory (only virtual memory)
+
+// a memory mapped file might save memory if file is already cached.
+// e.g, when page fault, OS will point to file cache, instead of new physical memory
+
+// page file is for overcommits, i.e. exceed physical memory (really only benefit of memory mapped files; so theoretical niceties). perhaps just api changes are benefit
+// also, memory mapped files don't allow for async file io, as blocks thread?
 
 // so, remember OS is doing behind-the-scenes work clearing and giving us pages  
 
