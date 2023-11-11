@@ -11,6 +11,24 @@
 // With profile overview ascertained, see that reading is large part. So, run in repetition test.
 // See higher bandwidth in repetition tester than in our application, particularly on first read.
 // Collecting OS metrics on repetition tester, see that get page faults when repeating mallocs
+// So, we now know roughly what our practical peak performance is.
+// We want to know: 1. how close is this to theoretical maximum? 2. is this most efficient way?
+//
+// We know that file will probably be in OS cache. So, effectively a memory read and memory write
+// IMPORTANT: the best way to look at dissassembly is in debugger, to ensure compiled with same flags etc.
+// IMPORTANT: when inspecting assembly in debugger want to verify section looking at; can have registers (rax/al etc.) in watch to aid this
+// also want to have -O1 flag to remove cruft, but not go all the way to auto-vectorisation
+// TODO: incorporate comp95.. into assembly understanding, e.g. overflow flag for signed jumps, cmp is a sub, etc.
+//
+// how much CPU bring in, process and decode for this loop?
+// how much are we asking the CPU to process each loop?
+// See that loop is processing 11 bytes of instructions per iteration
+// Running loop under profiler know bandwidth
+// Know each loop writing 1 byte
+// So: machine-freq / bandwidth = num-cycles per loop
+//
+//
+// TODO: fractional cycle counts typical for superscalar cpus?
 //
 // 8086 had linear access of memory. cortex-m4 similar, however MPU to enforce some memory safety.
 // modern OS also has virtual memory. malloc gives memory in our process virtual address.
@@ -36,6 +54,7 @@
 // so, remember OS is doing behind-the-scenes work clearing and giving us pages  
 
 // IMPORTANT(Ryan): mlock() applicable for server applications as can control the machine (also for embedded say)
+
 
 struct AddressArray
 {
