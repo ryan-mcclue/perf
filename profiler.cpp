@@ -33,7 +33,6 @@
   GLOBAL Profiler global_profiler;
   GLOBAL u32 global_profiler_parent_slot_index;
 
-
   #define PROFILER_END_OF_COMPILATION_UNIT \
     STATIC_ASSERT(__COUNTER__ <= ARRAY_COUNT(global_profiler.slots))
   #define PROFILE_BLOCK(name) \
@@ -51,7 +50,7 @@
   INTERNAL void
   profiler_init(void)
   {
-    global_profiler.start = __rdtsc();
+    global_profiler.start = read_cpu_timer();
   }
   
   INTERNAL ProfileEphemeral
@@ -67,7 +66,7 @@
 
     slot->byte_count += byte_count;
   
-    ephemeral.start = __rdtsc();
+    ephemeral.start = read_cpu_timer();
   
     return ephemeral;
   }
@@ -75,7 +74,7 @@
   INTERNAL u32
   profile_block_end(ProfileEphemeral *ephemeral)
   {
-    u64 elapsed = __rdtsc() - ephemeral->start; 
+    u64 elapsed = read_cpu_timer() - ephemeral->start; 
   
     global_profiler_parent_slot_index = ephemeral->parent_slot_index;
   
@@ -96,7 +95,7 @@
   profiler_end_and_print(void)
   {
     u64 cpu_freq = linux_estimate_cpu_timer_freq();
-    u64 total = __rdtsc() - global_profiler.start;
+    u64 total = read_cpu_timer() - global_profiler.start;
     if (cpu_freq)
     {
       printf("\nTotal time: %0.4fms (CPU freq %lu)\n", 1000.0 * (f64)total/(f64)cpu_freq, cpu_freq);
@@ -145,14 +144,14 @@
   INTERNAL void
   profiler_init(void)
   {
-    global_profiler.start = __rdtsc();
+    global_profiler.start = read_cpu_timer();
   }
 
   INTERNAL void
   profiler_end_and_print(void)
   {
     u64 cpu_freq = linux_estimate_cpu_timer_freq();
-    u64 total = __rdtsc() - global_profiler.start;
+    u64 total = read_cpu_timer() - global_profiler.start;
     if (cpu_freq)
     {
       printf("\nTotal time: %0.4fms (CPU freq %lu)\n", 1000.0 * (f64)total/(f64)cpu_freq, cpu_freq);

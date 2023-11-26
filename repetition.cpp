@@ -1,33 +1,81 @@
 // SPDX-License-Identifier: zlib-acknowledgement
-
 #pragma once
 
 typedef enum
 {
-  REPETITION_TESTER_STATE_UNINITIALISED = 0,
-  REPETITION_TESTER_STATE_TESTING,
-  REPETITION_TESTER_STATE_COMPLETED,
-  REPETITION_TESTER_STATE_ERROR,
-  REPETITION_TESTER_STATE_COUNT
-} REPETITION_TESTER_STATE;
+  TESTER_STATE_UNINITIALISED = 0,
+  TESTER_STATE_TESTING,
+  TESTER_STATE_COMPLETED,
+  TESTER_STATE_ERROR,
+  TESTER_STATE_COUNT
+} TESTER_STATE;
 
 typedef struct RepetitionTester RepetitionTester;
 struct RepetitionTester
 {
-  REPETITION_TESTER_STATE state;
-  u32 test_time;
+  TESTER_STATE state;
+  u64 time_accumulated_on_this_test;
+  u64 bytes_accumulated_on_this_test;
+  u64 start;
+  u64 repeat_time;
+
+  u64 min_time;
+  u64 max_time;
+  u64 total_time;
+  u64 test_count;
 };
 
-INTERNAL b32 
-are_testing(RepetitionTester *tester)
+INTERNAL void
+print_tester_time(RepetitionTester *tester, u64 cpu_time, const char *label, u64 byte_count)
 {
-  if (tester->state == REPEAT_STATE_TESTING)
+  printf("%s: %.0f", label, cpu_time);
+  f64 seconds = cpu_time / tester->cpu_timer_freq;
+  printf(" (%fms)", 1000.0f*seconds);
+  
+  if (byte_count != 0)
+  {
+    f64 best_bandwidth = byte_count / (GB(1) * seconds);
+    printf(" %fgb/s", best_bandwidth);
+  }
+}
+
+INTERNAL void
+print_tester_results(RepetitionTester *tester)
+{
+  print_tester_time("Min.", (f64)tester->min_time, tester->cpu_timer_freq, tester->target_bytes_processed);
+  printf("\n");
+  
+  print_tester_time("Max.", (f64)tester->max_time, tester->cpu_timer_freq, tester->target_bytes_processed);
+  printf("\n");
+  
+  if(tester->test_count)
+  {
+    print_tester_time("Avg.", (f64)tester->total_time / (f64)tester->test_count, 
+                      tester->cpu_timer_freq, tester->target_bytes_processed);
+    printf("\n");
+  }
+}
+
+INTERNAL void
+tester_error(RepetitionTester *tester, const char *msg)
+{
+  tester->state = TESTER_STATE_ERROR;
+  WARN("%s", msg);
+}
+
+INTERNAL TESTER_STATE 
+update_tester(RepetitionTester *tester)
+{
+  if (tester->state == TESTER_STATE_TESTING)
   {
     u64 current_time = read_cpu_timer();
 
-    if (tester->bytes_accumulated_on_this_test != tester->target_bytes_processed) test_error();
+    if (tester->bytes_accumulated_on_this_test != tester->target_bytes_processed)
+    {
+      tester_error(tester, "Repetition tester did not accumulate target bytes");
+    }
     
-    if (tester->state == REPEAT_STATE_TESTING)
+    if (tester->state == TESTER_STATE_TESTING)
     {
       u32 elapsed_time = tester->time_accumulated_on_this_test;
       tester->test_count += 1;
@@ -40,97 +88,74 @@ are_testing(RepetitionTester *tester)
       {
         tester->min_time = elapsed_time;
 
-        // so, test_time is from most recent minimum
-        tester->tests_started_at = current_time;
+        // NOTE(Ryan): So, repeat_time begins from most recent minimum
+        tester->start = current_time;
+
+        print_tester_time("New Min.", tester->bytes_accumulated_on_this_test);
       }
       tester->time_accumulated_on_this_test = 0;
       tester->bytes_accumulated_on_this_test = 0;
     }
 
-    if ((current_time - tester->test_started_at) > tester->test_time)
+    if ((current_time - tester->start) > tester->test_time)
     {
       tester->state = COMPLETED;
-      print_results();
+      print_tester_results(tester);
     }
-
   }
+
+  return tester->state;
 }
 
-BEGIN_TIME()
+INTERNAL u32
+begin_test_time(RepetitionTester *tester)
 {
-  state->open_block_count++;
-  state->repeat_time -= read_cpu_timer();
+  tester->repeat_time -= read_cpu_timer();
+  return 0;
 }
-END_TIME()
+
+INTERNAL u32
+end_test_time(RepetitionTester *tester)
 {
-  state->close_block_count++;
-  state->repeat_time += read_cpu_timer();
+  tester->repeat_time += read_cpu_timer();
+  return 0;
 }
+
+#define TIME_TEST(tester) \
+  for (UNIQUE_NAME(v) = begin_test_time(tester); \
+       UNIQUE_NAME(v) == 0; \
+       end_test_time(tester), UNIQUE_NAME(v)++)
 
 INTERNAL void
-repeat_read_via_fread(RepeatState *state, ReadParams *params)
+test_read_via_fread(RepetitionTester *tester, ReadParams *params)
 {
   while (true)
   {
      FILE *file = fopen(params->name, "rb"); 
      if (file != NULL)
      {
-       BEGIN_TIME(tester);
-       u32 res = fread(params->buffer);
-       END_TIME(tester);
+       u32 res = 0;
+       TIME_TEST(tester) 
+       {
+         res = fread(params->buffer);
+       }
 
        if (res == 1) repetition_count_bytes(tester, params->buffer.count);
        // TODO(Ryan): How are incomplete file reads handled?
      }
      else
      {
-       repetition_error(tester, "fopen() failed");
-       break;
+       tester_error(tester, "fopen() failed");
      }
 
-     // update
+     if (update_tester(tester) != REPETITION_TESTER_MODE_TESTING) break;
   }
-}
-
-INTERNAL void
-repeat(RepeatState *state, u64 target_processed_byte_count, u64 cpu_timer_freq, u32 seconds_to_try)
-{
-
-}
-
-static void NewTestWave(repetition_tester *Tester, u64 TargetProcessedByteCount, u64 CPUTimerFreq, u32 SecondsToTry = 10)
-{
-    if(Tester->Mode == TestMode_Uninitialized)
-    {
-        Tester->Mode = TestMode_Testing;
-        Tester->TargetProcessedByteCount = TargetProcessedByteCount;
-        Tester->CPUTimerFreq = CPUTimerFreq;
-        Tester->PrintNewMinimums = true;
-        Tester->Results.MinTime = (u64)-1;
-    }
-    else if(Tester->Mode == TestMode_Completed)
-    {
-        Tester->Mode = TestMode_Testing;
-        
-        if(Tester->TargetProcessedByteCount != TargetProcessedByteCount)
-        {
-            Error(Tester, "TargetProcessedByteCount changed");
-        }
-        
-        if(Tester->CPUTimerFreq != CPUTimerFreq)
-        {
-            Error(Tester, "CPU frequency changed");
-        }
-    }
-
-    Tester->TryForTime = SecondsToTry*CPUTimerFreq;
-    Tester->TestsStartedAt = ReadCPUTimer();
 }
 
 TestFunc func = {"fread", read_via_fread};
 
 INTERNAL void
-repeat_reads(void)
+test_reads(void)
 {
   RepetitionTester testers[ARRAY_COUNT(test_functions)]; 
 
@@ -138,18 +163,21 @@ repeat_reads(void)
   params.name = "file.bin";
   params.buffer = malloc();
 
-  while (true) 
+  u64 cpu_timer_freq = linux_estimate_cpu_timer_freq();
+
+  for (u32 i = 0; i < ARRAY_COUNT(test_functions); i += 1)
   {
-    for (u32 i = 0; i < ARRAY_COUNT(test_functions); i += 1)
-    {
-      RepetitionTester *tester = testers + i;
-      TestFunc *func = tester->func;
-      printf("\n--- %s ---\n", func.name);
+    RepetitionTester *tester = testers + i;
+    TestFunc *func = tester->func;
+    printf("\n--- %s ---\n", func.name);
 
-      init_repeat_state(tester);
-      //NewTestWave(Tester, Params.Dest.Count, CPUTimerFreq);
+    tester->state = TESTER_STATE_TESTING;
+    tester->target_processed_byte_count = target_processed_byte_count;
+    tester->cpu_timer_freq = cpu_timer_freq;
+    tester->min_time = U64_MAX;
+    tester->repeat_time = 5*cpu_timer_freq;
+    tester->start = read_cpu_timer();
 
-      func.func(tester, &params);
-    }
+    func->func(tester, &params);
   }
 }
