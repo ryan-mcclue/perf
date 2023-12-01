@@ -48,7 +48,7 @@ print_tester_results(RepetitionTester *tester)
   print_tester_time("Max.", (f64)tester->max_time, tester->cpu_timer_freq, tester->target_bytes_processed);
   printf("\n");
   
-  if(tester->test_count)
+  if (tester->test_count)
   {
     print_tester_time("Avg.", (f64)tester->total_time / (f64)tester->test_count, 
                       tester->cpu_timer_freq, tester->target_bytes_processed);
